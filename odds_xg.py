@@ -2,40 +2,27 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import io   
+import io
 import math
 import numpy as np
 import random
 import time
-from scipy.stats import norm, poisson
+from scipy.stats import norm, poisson, skellam
+from scipy.optimize import minimize
 
 #Set page title and icon
 st.set_page_config(page_title="Odds Wizard", page_icon=":soccer:")
 
-#Calculate 1x2 and xG
-def calculate_1x2_and_xg(home_win_prob, total_expected_goals, max_goals=10):
-    if not (0 <= home_win_prob <= 1) or total_expected_goals <= 0:
-        raise ValueError("Invalid inputs: home_win_prob must be between 0 and 1, total_expected_goals must be positive")
-    
-    # DNB probabilities
-    
-    # Estimate the difference in expected goals using normal approximation
-    # Assume the log ratio of xG_H / xG_A relates to DNB probability
-    sigma = 1.0  # Standard deviation for log difference, can be tuned
-    z = norm.ppf(home_win_prob)  # Inverse CDF to get z-score
-    log_diff = z * sigma  # Log(xG_H / xG_A)
-    
-    # Solve for xG_H and xG_A given xg_total = xG_H + xG_A
-    # xG_H / xG_A = exp(log_diff)
-    ratio = np.exp(log_diff)
-    away_xg = total_expected_goals / (1 + ratio)
-    home_xg = total_expected_goals - away_xg
-    
+# Calculate 1x2 and xG
+def calculate_1x2_and_xg(home_xg, away_xg, max_goals=10):
+    if home_xg < 0 or away_xg < 0:
+        raise ValueError("Invalid inputs: xG values must be non-negative")
+
     # Calculate probabilities using Poisson distribution
     p_home_win = 0.0
     p_draw = 0.0
     p_away_win = 0.0
-    
+
     for home_goals in range(max_goals + 1):
         for away_goals in range(max_goals + 1):
             p = poisson.pmf(home_goals,home_xg) * poisson.pmf(away_goals, away_xg)
@@ -45,15 +32,73 @@ def calculate_1x2_and_xg(home_win_prob, total_expected_goals, max_goals=10):
                 p_draw += p
             else:
                 p_away_win += p
-    
+
     # Normalize to ensure probabilities sum to 1 (due to truncation)
     total = p_home_win + p_draw + p_away_win
     if total > 0:
         p_home_win /= total
         p_draw /= total
         p_away_win /= total
-    
+
     return p_home_win, p_draw, p_away_win
+
+def calculate_xg_from_dnb_probs(home_dnb_prob, away_dnb_prob, total_xg, max_iter=500):
+    """
+    Calculate home/away xG directly from DNB probabilities and total xG.
+
+    Args:
+        home_dnb_prob (float): Probability of home win (draws excluded) [0-1]
+        away_dnb_prob (float): Probability of away win (draws excluded) [0-1]
+        total_xg (float): Total expected goals in the match
+        max_iter (int): Maximum optimization iterations
+
+    Returns:
+        tuple: (home_xg, away_xg)
+    """
+    # Validate probabilities
+    if not np.isclose(home_dnb_prob + away_dnb_prob, 1.0, atol=1e-4):
+        raise ValueError("DNB probabilities must sum to 1")
+
+    def objective(lambda_h):
+        lambda_a = total_xg - lambda_h
+
+        if lambda_h <= 1e-5 or lambda_a <= 1e-5:
+            return 1e9  # Penalize invalid values
+
+        # Calculate outcome probabilities using Skellam distribution
+        home_win_prob = 1 - skellam.cdf(0, lambda_h, lambda_a)
+        draw_prob = skellam.pmf(0, lambda_h, lambda_a)
+
+        # Avoid division by zero in extreme cases
+        if draw_prob >= 1 - 1e-5:
+            return 1e9
+
+        # Calculate model's DNB probabilities
+        model_h_dnb = home_win_prob / (1 - draw_prob)
+        model_a_dnb = (1 - draw_prob - home_win_prob) / (1 - draw_prob) # Corrected away DNB prob
+
+        # Calculate error (squared differences)
+        error = (model_h_dnb - home_dnb_prob)**2 + (model_a_dnb - away_dnb_prob)**2
+        return error
+
+    # Initial guess based on DNB probabilities
+    initial_guess = total_xg * home_dnb_prob
+    bounds = [(1e-5, total_xg - 1e-5)]
+
+    # Numerical optimization
+    result = minimize(objective,
+                     x0=initial_guess,
+                     method='L-BFGS-B',
+                     bounds=bounds,
+                     options={'maxiter': max_iter})
+
+    if not result.success:
+        raise ValueError(f"Optimization failed: {result.message}")
+
+    home_xg = round(result.x[0], 4)
+    away_xg = round(total_xg - home_xg, 4)
+    return home_xg, away_xg
+
 
 #Dictionaries of country and leagues
 leagues_dict = {
@@ -201,10 +246,10 @@ def fetch_table(country, league, table_type="home"):
         soup = BeautifulSoup(response.text, "lxml")
         html_io = io.StringIO(str(soup))
         tables = pd.read_html(html_io, flavor="lxml")
-        
+
         # Get the rating table as before (using table index 14)
         rating_table = tables[14] if tables and len(tables) > 14 else None
-        
+
         # Expected columns for the league table
         expected_columns = {"Home", "Away", "Home.4", "Away.4"}
         possible_indices = [28, 24, 23]
@@ -323,7 +368,7 @@ with st.sidebar.expander("How to Use This App", expanded=True):
     st.write("2. Click 'Get Ratings' to fetch the latest data.")
     st.write("3. Select Home and Away Teams from the dropdowns.")
     st.write("4. View calculated odds and expected goals.")
-    
+
 
 # Sidebar: Select Match Details
 st.sidebar.header("⚽ Select Match Details")
@@ -336,7 +381,7 @@ tab1, tab2 = st.tabs(["Elo Ratings Odds Calculator", "League Table"])
 with tab1:
     # Create a progress bar
     progress_bar = st.progress(0)
-    
+
     # Fetch data if not available or league has changed
     if "home_table" not in st.session_state or "away_table" not in st.session_state or st.session_state.get("selected_league") != selected_league:
         if st.sidebar.button("Get Ratings", key="fetch_button", help="Fetch ratings and tables for selected country and league"):
@@ -366,7 +411,7 @@ with tab1:
             home_team = st.selectbox("Select Home Team:", st.session_state["home_table"].iloc[:, 0])
         with col2:
             away_team = st.selectbox("Select Away Team:", st.session_state["away_table"].iloc[:, 0])
-        
+
         # Fetch team ratings
         home_team_data = st.session_state["home_table"][st.session_state["home_table"].iloc[:, 0] == home_team]
         away_team_data = st.session_state["away_table"][st.session_state["away_table"].iloc[:, 0] == away_team]
@@ -374,8 +419,14 @@ with tab1:
         away_rating = away_team_data.iloc[0, 1]
         home = 10**(home_rating / 400)
         away = 10**(away_rating / 400)
-        home_win_prob = home / (home + away)
-        away_win_prob = away / (home + away)
+        home_win_prob_raw = home / (home + away)
+        away_win_prob_raw = away / (home + away)
+
+        # Normalize win probabilities to exclude draw for DNB calculation
+        total_win_prob = home_win_prob_raw + away_win_prob_raw
+        home_win_prob_dnb = home_win_prob_raw / total_win_prob if total_win_prob > 0 else 0.5 # Normalize for DNB
+        away_win_prob_dnb = away_win_prob_raw / total_win_prob if total_win_prob > 0 else 0.5 # Normalize for DNB
+
 
         # Display Ratings and Win Probabilities
         col1, col2 = st.columns(2)
@@ -386,26 +437,26 @@ with tab1:
         st.markdown('<div class="section-header">Win Probability</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
-            st.write(f"**{home_team} Win Probability:** {home_win_prob:.2f}")
+            st.write(f"**{home_team} Win Probability:** {home_win_prob_raw:.2f}")
         with col2:
-            st.write(f"**{away_team} Win Probability:** {away_win_prob:.2f}")
-        
+            st.write(f"**{away_team} Win Probability:** {away_win_prob_raw:.2f}")
+
         # Draw No Bet Odds Calculation
-        home_draw_no_bet_odds = 1 / home_win_prob
-        away_draw_no_bet_odds = 1 / away_win_prob
+        home_draw_no_bet_odds = 1 / home_win_prob_dnb if home_win_prob_dnb > 0 else float('inf')
+        away_draw_no_bet_odds = 1 / away_win_prob_dnb if away_win_prob_dnb > 0 else float('inf')
         st.markdown('<div class="section-header">Draw No Bet Odds</div>', unsafe_allow_html=True)
         col3, col4 = st.columns(2)
         with col3:
             st.write(f"**{home_team} Draw No Bet Odds:** {home_draw_no_bet_odds:.2f}")
         with col4:
             st.write(f"**{away_team} Draw No Bet Odds:** {away_draw_no_bet_odds:.2f}")
-        
+
         # Initialize variables for goals statistics
         home_goals_for_per_game = None
         home_goals_against_per_game = None
         away_goals_for_per_game = None
         away_goals_against_per_game = None
-        
+
         # Helper function to extract goals (format "GF:GA")
         def extract_goals_parts(value):
             try:
@@ -418,7 +469,7 @@ with tab1:
                     return None, None
             except Exception as e:
                 return None, None
-        
+
         # Calculate goals statistics from league table if available
         if "league_table" in st.session_state and st.session_state["league_table"] is not None:
             league_table = st.session_state["league_table"]
@@ -470,22 +521,32 @@ with tab1:
                     st.write("**Average Goals per Match:** N/A")
             else:
                 st.write("The required columns ('Goals' and/or 'M') were not found in the league table.")
-        
+
         # Calculate Expected Goals using per game statistics
-        home_xg = None
-        away_xg = None
+        home_xg_base = None
+        away_xg_base = None
         total_expected_goals = None
         if home_goals_for_per_game is not None and away_goals_against_per_game is not None:
-            home_xg = (home_goals_for_per_game + away_goals_against_per_game) / 2
+            home_xg_base = (home_goals_for_per_game + away_goals_against_per_game) / 2
         if away_goals_for_per_game is not None and home_goals_against_per_game is not None:
-            away_xg = (away_goals_for_per_game + home_goals_against_per_game) / 2
-        if home_xg is not None and away_xg is not None and avg_goals_per_match is not None:
-            total_expected_goals = ((home_xg + away_xg) + avg_goals_per_match) / 2
-    
-        # Display 1X2 odds and xG 
+            away_xg_base = (away_goals_for_per_game + home_goals_against_per_game) / 2
+        if home_xg_base is not None and away_xg_base is not None and avg_goals_per_match is not None:
+            total_expected_goals = ((home_xg_base + away_xg_base) + avg_goals_per_match) / 2
+
+        # Calculate xG from DNB probs and total xG
+        home_xg = None
+        away_xg = None
         if total_expected_goals is not None and total_expected_goals > 0:
             try:
-                p_home_win, p_draw, p_away_win = calculate_1x2_and_xg(home_win_prob, total_expected_goals)
+                home_xg, away_xg = calculate_xg_from_dnb_probs(home_win_prob_dnb, away_win_prob_dnb, total_expected_goals)
+            except ValueError as e:
+                st.error(f"Error calculating xG from DNB probabilities: {e}")
+
+
+        # Display 1X2 odds and xG
+        if home_xg is not None and away_xg is not None and total_expected_goals is not None and total_expected_goals > 0:
+            try:
+                p_home_win, p_draw, p_away_win = calculate_1x2_and_xg(home_xg, away_xg)
                 home_odds_poisson = 1 / p_home_win if p_home_win > 0 else float('inf')
                 draw_odds_poisson = 1 / p_draw if p_draw > 0 else float('inf')
                 away_odds_poisson = 1 / p_away_win if p_away_win > 0 else float('inf')
@@ -499,13 +560,13 @@ with tab1:
         st.markdown('<div class="section-header">1X2 Betting Odds</div>', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.markdown(f"<div class='card'><b>{home_team}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='color:black' class='card'><b>{home_team}</b></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='card'><div class='card-title'></div><div class='card-odds'>{home_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='card'><b>Draw</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='color:black' class='card'><b>Draw</b></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='card'><div class='card-title'></div><div class='card-odds'>{draw_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='card'><b>{away_team}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='color:black' class='card'><b>{away_team}</b></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='card'><div class='card-title'></div><div class='card-odds'>{away_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
 
         #Display home xG, away xG and total xG
