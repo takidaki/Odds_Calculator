@@ -322,8 +322,8 @@ with st.sidebar.expander("How to Use This App", expanded=True):
     st.write("1. Select Country and League.")
     st.write("2. Click 'Get Ratings' to fetch the latest data.")
     st.write("3. Select Home and Away Teams from the dropdowns.")
-    st.write("4. Adjust the Draw Probability Slider (optional).")
-    st.write("5. View calculated odds and expected goals.")
+    st.write("4. View calculated odds and expected goals.")
+    
 
 # Sidebar: Select Match Details
 st.sidebar.header("⚽ Select Match Details")
