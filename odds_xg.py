@@ -499,11 +499,14 @@ with tab1:
         st.markdown('<div class="section-header">1X2 Betting Odds</div>', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.markdown(f"<div class='card'><div class='card-title'>{home_team} Win (1)</div><div class='card-odds'>{home_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>{home_team}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><div class='card-title'></div><div class='card-odds'>{home_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='card'><div class='card-title'>Draw (X)</div><div class='card-odds'>{draw_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>Draw</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><div class='card-title'></div><div class='card-odds'>{draw_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='card'><div class='card-title'>{away_team} Win (2)</div><div class='card-odds'>{away_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>{away_team}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><div class='card-title'></div><div class='card-odds'>{away_odds_poisson:.2f}</div></div>", unsafe_allow_html=True)
 
         #Display home xG, away xG and total xG
         st.markdown('<div class="section-header">Expected Goals</div>', unsafe_allow_html=True)
