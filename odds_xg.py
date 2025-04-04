@@ -547,6 +547,9 @@ with tab1:
         if home_xg is not None and away_xg is not None and total_expected_goals is not None and total_expected_goals > 0:
             try:
                 p_home_win, p_draw, p_away_win = calculate_1x2_and_xg(home_xg, away_xg)
+                home_odds_poisson = 1 / p_home_win if p_home_win > 0 else float('inf')
+                draw_odds_poisson = 1 / p_draw if p_draw > 0 else float('inf')
+                away_odds_poisson = 1 / p_away_win if p_away_win > 0 else float('inf')
                
                 p_under_25 = poisson.cdf(2, total_expected_goals)
                 p_over_25 = 1 - p_under_25
