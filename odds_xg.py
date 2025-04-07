@@ -115,7 +115,7 @@ leagues_dict = {
     "Denmark": ["DK1", "DK2", "DK3G1", "DK3G2"],
     "Greece": ["GR1", "GR2"],
     "Norway": ["NO1", "NO2", "NO3G1", "NO3G2"],
-    "Czech Republic": ["CZ1", "CZ2"],
+    "Czech-Republic": ["CZ1", "CZ2"],
     "Turkey": ["TU1", "TU2", "TU3B", "TU3K"],
     "Belgium": ["BE1", "BE2"],
     "Scotland": ["SC1", "SC2", "SC3", "SC4"],
