@@ -11,7 +11,7 @@ from scipy.stats import norm, poisson, skellam
 from scipy.optimize import minimize
 
 #Set page title and icon
-st.set_page_config(page_title="Odds Wizard", page_icon=":soccer:")
+st.set_page_config(page_title="BetWise", page_icon=":soccer:")
 
 # Calculate 1x2 and xG
 def calculate_1x2_and_xg(home_xg, away_xg, max_goals=10):
@@ -356,7 +356,7 @@ st.markdown("""\
 """, unsafe_allow_html=True)
 
 # Streamlit header
-st.markdown('<div class="header">⚽ Elo Ratings Odds Calculator</div>', unsafe_allow_html=True)
+st.markdown('<div class="header">⚽ BetWise- Elo Odds Calculator</div>', unsafe_allow_html=True)
 
 # Explanation tooltip
 if "data_fetched" not in st.session_state:
